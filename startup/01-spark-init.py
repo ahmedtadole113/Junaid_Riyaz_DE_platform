@@ -13,7 +13,9 @@ if spark is None:
     print("🔧 Initializing Spark with Iceberg support...")
 
     spark = SparkSession.builder.appName("JupyterNotebook") \
+        .config("spark.sql.catalog.demo.s3.endpoint", "http://minio:9000") \
         .config("spark.sql.catalog.demo.s3.path-style-access", "true") \
+        .config("spark.sql.catalog.demo.s3.region", "us-east-1") \
         .getOrCreate()
 
     # Set log level to reduce noise

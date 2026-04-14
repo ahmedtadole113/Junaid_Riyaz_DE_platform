@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 # Create Spark session using environment defaults (Iceberg + REST Catalog)
 spark = SparkSession.builder.appName("Run DDLs for TPCH data") \
     .config("spark.sql.catalog.demo.s3.path-style-access", "true") \
+    .config("spark.sql.catalog.demo.s3.endpoint", "http://minio:9000") \
+    .config("spark.sql.catalog.demo.s3.region", "us-east-1") \
     .getOrCreate()
 
 spark.sql("CREATE SCHEMA IF NOT EXISTS prod_db")
