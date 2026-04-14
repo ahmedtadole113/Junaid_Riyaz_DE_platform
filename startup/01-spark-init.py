@@ -12,7 +12,9 @@ spark = SparkSession.getActiveSession()
 if spark is None:
     print("🔧 Initializing Spark with Iceberg support...")
 
-    spark = SparkSession.builder.appName("JupyterNotebook").getOrCreate()
+    spark = SparkSession.builder.appName("JupyterNotebook") \
+        .config("spark.sql.catalog.demo.s3.path-style-access", "true") \
+        .getOrCreate()
 
     # Set log level to reduce noise
     spark.sparkContext.setLogLevel("WARN")

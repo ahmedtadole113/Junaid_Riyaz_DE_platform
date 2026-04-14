@@ -12,13 +12,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Create Spark session
+# Create Spark session using environment defaults (Iceberg + REST Catalog)
 spark = SparkSession.builder.appName("Run DDLs for TPCH data") \
-    .config("spark.jars.packages", "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0") \
-    .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
-    .config("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog") \
-    .config("spark.sql.catalog.spark_catalog.type", "hadoop") \
-    .config("spark.sql.catalog.spark_catalog.warehouse", str(Path("./warehouse").absolute())) \
+    .config("spark.sql.catalog.demo.s3.path-style-access", "true") \
     .getOrCreate()
 
 spark.sql("CREATE SCHEMA IF NOT EXISTS prod_db")
