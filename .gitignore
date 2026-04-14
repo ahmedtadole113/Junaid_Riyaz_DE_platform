@@ -1,0 +1,16 @@
+# Data & Warehouse
+warehouse/
+spark-warehouse/
+.ipynb_checkpoints/
+*.db
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# MacOS
+.DS_Store
