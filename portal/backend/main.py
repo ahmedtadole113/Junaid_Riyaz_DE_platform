@@ -2,11 +2,11 @@ import os
 import json
 import time
 import logging
+import subprocess
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import docker
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -15,7 +15,7 @@ logger = logging.getLogger("portal-backend")
 app = FastAPI(
     title="Azure Data Engineering Practice Platform - Portal Backend",
     description="Manages local equivalents of Azure services and provides user authentication.",
-    version="1.1.0"
+    version="2.0.0"
 )
 
 # CORS Setup
@@ -27,26 +27,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Docker Client
-try:
-    docker_client = docker.from_env()
-    logger.info("Connected to Docker daemon successfully")
-except Exception as e:
-    logger.error(f"Failed to connect to Docker daemon: {e}")
-    docker_client = None
-
-# Map of service names to their container names
-SERVICE_CONTAINERS = {
+# Map of service keys to their supervisor process names
+SERVICE_PROCESSES = {
     "datalake": "minio",
-    "databricks": "spark-processing",
+    "databricks": "jupyter",
     "airflow": "airflow-webserver",
-    "synapse": "postgres-dw",
-    "eventhub": "redpanda",
+    "synapse": "pgadmin",
+    "eventhub": "redpanda-console",
     "servicebus": "rabbitmq",
     "monitoring": "grafana"
 }
 
-# UI URLs for services
+# Human-readable service names
+SERVICE_NAMES = {
+    "datalake": "Data Lake",
+    "databricks": "Data Bricks",
+    "airflow": "Airflow",
+    "synapse": "Synapse",
+    "eventhub": "Event Hub",
+    "servicebus": "Service Bus",
+    "monitoring": "Monitoring"
+}
+
+# UI URLs for services (localhost since single container)
 SERVICE_URLS = {
     "datalake": "http://localhost:9001",
     "databricks": "http://localhost:8888",
@@ -57,8 +60,8 @@ SERVICE_URLS = {
     "monitoring": "http://localhost:3010"
 }
 
-# Persistent Users DB path (saved on host workspace for durability)
-USERS_DB_PATH = "/home/iceberg/users.json"
+# Persistent Users DB path
+USERS_DB_PATH = "/data/users.json"
 
 # In-memory fallback if path not writable
 _fallback_users = {
@@ -104,32 +107,86 @@ class UserCreateRequest(BaseModel):
 # Initialize users
 users_db = load_users()
 
-def get_container_stats(container) -> Dict:
+# ==========================================
+# SUPERVISOR-BASED SERVICE MANAGEMENT
+# ==========================================
+
+def get_supervisor_status(process_name: str) -> dict:
+    """Get status of a supervisor-managed process."""
     try:
-        stats = container.stats(stream=False)
-        cpu_stats = stats.get("cpu_stats", {})
-        precpu_stats = stats.get("precpu_stats", {})
-        cpu_usage = cpu_stats.get("cpu_usage", {}).get("total_usage", 0)
-        precpu_usage = precpu_stats.get("cpu_usage", {}).get("total_usage", 0)
-        system_cpu = cpu_stats.get("system_cpu_usage", 0)
-        presystem_cpu = precpu_stats.get("system_cpu_usage", 0)
-        online_cpus = cpu_stats.get("online_cpus", 1)
+        result = subprocess.run(
+            ["supervisorctl", "status", process_name],
+            capture_output=True, text=True, timeout=5
+        )
+        output = result.stdout.strip()
+        # Output format: "process_name   RUNNING   pid 1234, uptime 0:05:00"
+        if "RUNNING" in output:
+            # Extract PID
+            pid = None
+            try:
+                pid_part = output.split("pid ")[1].split(",")[0]
+                pid = int(pid_part)
+            except (IndexError, ValueError):
+                pass
+            return {"status": "running", "pid": pid}
+        elif "STOPPED" in output or "EXITED" in output:
+            return {"status": "stopped", "pid": None}
+        elif "STARTING" in output:
+            return {"status": "starting", "pid": None}
+        elif "FATAL" in output:
+            return {"status": "fatal", "pid": None}
+        else:
+            return {"status": "unknown", "pid": None}
+    except Exception as e:
+        logger.error(f"Failed to get status for {process_name}: {e}")
+        return {"status": "error", "pid": None}
+
+
+def get_process_stats(pid: int) -> Dict:
+    """Get CPU and memory stats for a process by PID using /proc filesystem."""
+    try:
+        # Read memory from /proc/PID/status
+        mem_rss = 0
+        with open(f"/proc/{pid}/status", "r") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    mem_rss = int(line.split()[1]) * 1024  # Convert KB to bytes
+                    break
         
-        cpu_percent = 0.0
-        if system_cpu - presystem_cpu > 0.0:
-            cpu_percent = ((cpu_usage - precpu_usage) / (system_cpu - presystem_cpu)) * online_cpus * 100.0
+        # Simple CPU percentage (snapshot-based approximation)
+        try:
+            with open(f"/proc/{pid}/stat", "r") as f:
+                stat = f.read().split()
+            utime = int(stat[13])
+            stime = int(stat[14])
+            total_time = utime + stime
             
-        mem_stats = stats.get("memory_stats", {})
-        mem_usage = mem_stats.get("usage", 0)
-        inactive_file = mem_stats.get("stats", {}).get("inactive_file", 0)
-        net_mem_usage = max(0, mem_usage - inactive_file)
-        mem_limit = mem_stats.get("limit", 1)
-        mem_percent = (net_mem_usage / mem_limit) * 100.0 if mem_limit > 0 else 0.0
+            with open("/proc/uptime", "r") as f:
+                uptime = float(f.read().split()[0])
+            
+            clk_tck = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+            seconds = uptime - (int(stat[21]) / clk_tck)
+            if seconds > 0:
+                cpu_percent = ((total_time / clk_tck) / seconds) * 100.0
+            else:
+                cpu_percent = 0.0
+        except Exception:
+            cpu_percent = 0.0
+        
+        # Get total system memory for percentage calculation
+        mem_total = 1
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mem_total = int(line.split()[1]) * 1024  # KB to bytes
+                    break
+        
+        mem_percent = (mem_rss / mem_total) * 100.0 if mem_total > 0 else 0.0
         
         return {
             "cpu_percent": round(cpu_percent, 2),
-            "memory_usage_bytes": net_mem_usage,
-            "memory_limit_bytes": mem_limit,
+            "memory_usage_bytes": mem_rss,
+            "memory_limit_bytes": mem_total,
             "memory_percent": round(mem_percent, 2)
         }
     except Exception as e:
@@ -139,6 +196,7 @@ def get_container_stats(container) -> Dict:
             "memory_limit_bytes": 0,
             "memory_percent": 0.0
         }
+
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
@@ -202,26 +260,25 @@ def delete_user(username: str, x_user_role: Optional[str] = Header(None)):
 
 @app.get("/api/services")
 def list_services():
-    if docker_client is None:
-        raise HTTPException(status_code=503, detail="Docker daemon connection unavailable")
-        
     services_status = {}
-    for service_key, container_name in SERVICE_CONTAINERS.items():
+    for service_key, process_name in SERVICE_PROCESSES.items():
         try:
-            container = docker_client.containers.get(container_name)
-            state = container.status
+            sup_status = get_supervisor_status(process_name)
+            state = sup_status["status"]
+            pid = sup_status["pid"]
+            
             stats = {
                 "cpu_percent": 0.0,
                 "memory_usage_bytes": 0,
                 "memory_limit_bytes": 0,
                 "memory_percent": 0.0
             }
-            if state == "running":
-                stats = get_container_stats(container)
+            if state == "running" and pid:
+                stats = get_process_stats(pid)
                 
             services_status[service_key] = {
-                "name": service_key.replace("data", "Data ").replace("hub", " Hub").replace("bus", " Bus").title(),
-                "container_name": container_name,
+                "name": SERVICE_NAMES.get(service_key, service_key.title()),
+                "container_name": process_name,
                 "status": "online" if state == "running" else "offline",
                 "cpu_usage": f"{stats['cpu_percent']}%",
                 "memory_usage": f"{round(stats['memory_usage_bytes'] / (1024 * 1024), 1)} MB",
@@ -229,21 +286,10 @@ def list_services():
                 "memory_percent": f"{stats['memory_percent']}%",
                 "ui_url": SERVICE_URLS.get(service_key),
             }
-        except docker.errors.NotFound:
-            services_status[service_key] = {
-                "name": service_key.title(),
-                "container_name": container_name,
-                "status": "not_created",
-                "cpu_usage": "0%",
-                "memory_usage": "0 MB",
-                "memory_limit": "0 MB",
-                "memory_percent": "0%",
-                "ui_url": SERVICE_URLS.get(service_key),
-            }
         except Exception as e:
             services_status[service_key] = {
-                "name": service_key.title(),
-                "container_name": container_name,
+                "name": SERVICE_NAMES.get(service_key, service_key.title()),
+                "container_name": process_name,
                 "status": "error",
                 "cpu_usage": "0%",
                 "memory_usage": "0 MB",
@@ -258,21 +304,27 @@ def start_service(service_name: str, x_user_role: Optional[str] = Header(None)):
     if x_user_role != "admin":
         raise HTTPException(status_code=403, detail="Admin permissions required to modify services")
         
-    if docker_client is None:
-        raise HTTPException(status_code=503, detail="Docker daemon connection unavailable")
-        
-    container_name = SERVICE_CONTAINERS.get(service_name.lower())
-    if not container_name:
-        raise HTTPException(status_code=404, detail="Service not mapped to any container")
+    process_name = SERVICE_PROCESSES.get(service_name.lower())
+    if not process_name:
+        raise HTTPException(status_code=404, detail="Service not mapped to any process")
         
     try:
-        container = docker_client.containers.get(container_name)
-        if container.status != "running":
-            container.start()
+        sup_status = get_supervisor_status(process_name)
+        if sup_status["status"] == "running":
+            return {"status": "success", "message": f"Service {service_name} was already running"}
+        
+        result = subprocess.run(
+            ["supervisorctl", "start", process_name],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 or "started" in result.stdout.lower():
             return {"status": "success", "message": f"Service {service_name} started"}
-        return {"status": "success", "message": f"Service {service_name} was already running"}
-    except docker.errors.NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {container_name} not found.")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to start: {result.stderr or result.stdout}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Timeout while starting service")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -281,21 +333,27 @@ def stop_service(service_name: str, x_user_role: Optional[str] = Header(None)):
     if x_user_role != "admin":
         raise HTTPException(status_code=403, detail="Admin permissions required to modify services")
         
-    if docker_client is None:
-        raise HTTPException(status_code=503, detail="Docker daemon connection unavailable")
-        
-    container_name = SERVICE_CONTAINERS.get(service_name.lower())
-    if not container_name:
-        raise HTTPException(status_code=404, detail="Service not mapped to any container")
+    process_name = SERVICE_PROCESSES.get(service_name.lower())
+    if not process_name:
+        raise HTTPException(status_code=404, detail="Service not mapped to any process")
         
     try:
-        container = docker_client.containers.get(container_name)
-        if container.status == "running":
-            container.stop(timeout=5)
+        sup_status = get_supervisor_status(process_name)
+        if sup_status["status"] != "running":
+            return {"status": "success", "message": f"Service {service_name} was already stopped"}
+        
+        result = subprocess.run(
+            ["supervisorctl", "stop", process_name],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0 or "stopped" in result.stdout.lower():
             return {"status": "success", "message": f"Service {service_name} stopped"}
-        return {"status": "success", "message": f"Service {service_name} was already stopped"}
-    except docker.errors.NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {container_name} not found")
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to stop: {result.stderr or result.stdout}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Timeout while stopping service")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -615,4 +673,3 @@ def ai_copilot(req: AICopilotRequest):
             "response": f"Connection to Gemini API failed: {str(e)}. Falling back to local helper:\n\n" + run_local_fallback(req.service, req.action, req.content),
             "is_mock": True
         }
-
