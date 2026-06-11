@@ -22,12 +22,12 @@ if spark is None:
     spark.sparkContext.setLogLevel("WARN")
 
     print(f"✅ Spark {spark.version} session created")
-    print(f"📦 Default catalog: {spark.conf.get('spark.sql.defaultCatalog')}")
-    print(
-        f"💾 Warehouse location: {spark.conf.get('spark.sql.catalog.local.warehouse')}"
-    )
+    print(f"📦 Default catalog: {spark.conf.get('spark.sql.defaultCatalog', 'demo')}")
+    print(f"💾 Warehouse: {spark.conf.get('spark.sql.catalog.demo.warehouse', 's3://warehouse/wh/')}")
+    print("🚀 Delta Lake support enabled via spark_catalog")
 else:
     print("✅ Spark session already active")
 
 # Make spark available globally
 globals()["spark"] = spark
+

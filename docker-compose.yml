@@ -1,17 +1,109 @@
 version: "3.8"
 
 services:
-  spark-iceberg:
+  # ==========================================
+  # CORE PORTAL SERVICES (Always On / Default)
+  # ==========================================
+  portal-backend:
+    build:
+      context: ./portal/backend
+    container_name: portal-backend
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/home/iceberg
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=postgres-dw
+      - POSTGRES_DB=synapse_dw
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_PORT=5432
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  portal-frontend:
+    build:
+      context: ./portal/frontend
+    container_name: portal-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - portal-backend
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ==========================================
+  # STORAGE LAYER (ADLS Gen2 Equivalent)
+  # ==========================================
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    profiles:
+      - profile-storage
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password
+      - MINIO_BROWSER_REDIRECT_URL=http://localhost:5173/services/datalake
+    networks:
+      iceberg_net:
+        aliases:
+          - warehouse.minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - minio_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  mc:
+    image: minio/mc:latest
+    container_name: mc
+
+    profiles:
+      - profile-storage
+    depends_on:
+      - minio
+    networks:
+      - iceberg_net
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      /usr/bin/mc alias set myminio http://minio:9000 admin password;
+      /usr/bin/mc mb myminio/warehouse --ignore-existing;
+      /usr/bin/mc mb myminio/bronze --ignore-existing;
+      /usr/bin/mc mb myminio/silver --ignore-existing;
+      /usr/bin/mc mb myminio/gold --ignore-existing;
+      exit 0;
+      "
+
+  # ==========================================
+  # DATABRICKS PROCESSING LAYER (Spark & Jupyter)
+  # ==========================================
+  spark-processing:
     build: .
-    container_name: spark-iceberg
+    container_name: spark-processing
+    profiles:
+      - profile-processing
     depends_on:
       - rest
       - minio
-      - mc
     volumes:
       - ./warehouse:/home/iceberg/warehouse
       - .:/home/iceberg/notebooks
-      - ./notebooks/data:/home/iceberg/data
+      - ./data:/home/iceberg/data
     environment:
       - AWS_ACCESS_KEY_ID=admin
       - AWS_SECRET_ACCESS_KEY=password
@@ -24,10 +116,16 @@ services:
       - "10000:10000" # Thrift Server
     networks:
       - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   rest:
-    image: apache/iceberg-rest-fixture
+    image: apache/iceberg-rest-fixture:latest
     container_name: iceberg-rest
+    profiles:
+      - profile-processing
     networks:
       - iceberg_net
     ports:
@@ -42,41 +140,228 @@ services:
       - CATALOG_S3_ENDPOINT=http://minio:9000
       - CATALOG_S3_PATH_STYLE_ACCESS=true
       - CATALOG_S3_PATH__STYLE__ACCESS=true
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
-  minio:
-    image: minio/minio
-    container_name: minio
-    environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=password
-    networks:
-      iceberg_net:
-        aliases:
-          - warehouse.minio
+  # ==========================================
+  # ORCHESTRATION LAYER (Data Factory Equivalent)
+  # ==========================================
+  airflow-webserver:
+    build:
+      context: ./airflow
+    container_name: airflow-webserver
+    profiles:
+      - profile-orchestration
     ports:
-      - "9001:9001" # MinIO Console
-      - "9000:9000" # MinIO API
-    command: ["server", "/data", "--console-address", ":9001"]
+      - "8085:8080"
     volumes:
-      - minio_data:/data
-
-  mc:
-    image: minio/mc
-    container_name: mc
-    depends_on:
-      - minio
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/home/iceberg/data
+      - airflow_db:/opt/airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__CORE__DAMPENING_PERIOD=0
+      - AIRFLOW__WEBSERVER__X_FRAME_ENABLED=True
+      - AIRFLOW__WEBSERVER__X_FRAME_OPTIONS=ALLOWALL
+      - AIRFLOW__WEBSERVER__AUTH_ROLE_PUBLIC=Admin
+      - AIRFLOW__WEBSERVER__BASE_URL=http://localhost:5173/services/airflow
+      - POSTGRES_HOST=postgres-dw
+      - POSTGRES_DB=synapse_dw
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - AIRFLOW_CONN_POSTGRES_DW_CONN=postgres://postgres:password@postgres-dw:5432/synapse_dw
     networks:
       - iceberg_net
-    entrypoint: >
-      /bin/sh -c "
-      sleep 5;
-      /usr/bin/mc alias set myminio http://minio:9000 admin password;
-      /usr/bin/mc mb myminio/warehouse --ignore-existing;
-      exit 0;
+    command: >
+      bash -c "
+      airflow db init &&
+      airflow users create --username admin --password admin --firstname Admin --lastname Admin --role Admin --email admin@example.com || true;
+      exec airflow webserver
       "
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  airflow-scheduler:
+    build:
+      context: ./airflow
+    container_name: airflow-scheduler
+    profiles:
+      - profile-orchestration
+    depends_on:
+      - airflow-webserver
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/home/iceberg/data
+      - airflow_db:/opt/airflow
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__AUTH_ROLE_PUBLIC=Admin
+      - POSTGRES_HOST=postgres-dw
+      - POSTGRES_DB=synapse_dw
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - AIRFLOW_CONN_POSTGRES_DW_CONN=postgres://postgres:password@postgres-dw:5432/synapse_dw
+    networks:
+      - iceberg_net
+    command: bash -c "sleep 5; exec airflow scheduler"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ==========================================
+  # WAREHOUSE LAYER (Synapse SQL Pool Equivalent)
+  # ==========================================
+  postgres-dw:
+    image: postgres:16-alpine
+    container_name: postgres-dw
+    profiles:
+      - profile-warehouse
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=synapse_dw
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  pgadmin:
+    image: dpage/pgadmin4:8.4
+    container_name: pgadmin
+    profiles:
+      - profile-warehouse
+    ports:
+      - "5050:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=pgadmin4@pgadmin.org
+      - PGADMIN_DEFAULT_PASSWORD=password
+      - PGADMIN_CONFIG_SERVER_MODE=False
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
+      - SCRIPT_NAME=/services/synapse
+      - PGADMIN_CONFIG_X_FRAME_OPTIONS=""
+    volumes:
+
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ==========================================
+  # STREAMING LAYER (Event Hub / Service Bus Equivalents)
+  # ==========================================
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.6
+    container_name: redpanda
+    profiles:
+      - profile-streaming
+    command: >
+      redpanda start
+      --overprovisioned
+      --smp 1
+      --memory 256M
+      --reserve-memory 0M
+      --default-log-level=warn
+    ports:
+
+      - "9092:9092"
+      - "8082:8082"
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v2.4.6
+    container_name: redpanda-console
+    profiles:
+      - profile-streaming
+    depends_on:
+      - redpanda
+    ports:
+      - "8081:8080"
+    environment:
+      - KAFKA_BROKERS=redpanda:9092
+      - SERVER_BASEPATH=/services/eventhub
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbitmq
+    profiles:
+      - profile-streaming
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbitmq_management path_prefix "/services/servicebus"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ==========================================
+  # MONITORING LAYER (Azure Monitor Equivalent)
+  # ==========================================
+  grafana:
+    image: grafana/grafana-oss:10.4.1
+    container_name: grafana
+    profiles:
+      - profile-monitoring
+    ports:
+      - "3010:3000"
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+      - GF_SERVER_ROOT_URL=http://localhost:5173/services/monitoring
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+
+
+      - grafana_data:/var/lib/grafana
+    networks:
+      - iceberg_net
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
 networks:
   iceberg_net:
 
 volumes:
   minio_data:
+  postgres_data:
+  pgadmin_data:
+  rabbitmq_data:
+  grafana_data:
+  airflow_db:
