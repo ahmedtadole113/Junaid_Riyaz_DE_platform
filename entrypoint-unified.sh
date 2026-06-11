@@ -10,14 +10,14 @@ if [ ! -d "/data/pgdata" ]; then
     echo "📦 Initializing PostgreSQL data directory..."
     mkdir -p /data/pgdata
     chown postgres:postgres /data/pgdata
-    su - postgres -c "/usr/lib/postgresql/16/bin/initdb -D /data/pgdata"
+    su - postgres -c "/usr/lib/postgresql/13/bin/initdb -D /data/pgdata"
     # Allow local connections without password
     echo "host all all 0.0.0.0/0 trust" >> /data/pgdata/pg_hba.conf
     echo "local all all trust" >> /data/pgdata/pg_hba.conf
     # Start PostgreSQL temporarily to create the synapse_dw database
-    su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /data/pgdata start -w"
+    su - postgres -c "/usr/lib/postgresql/13/bin/pg_ctl -D /data/pgdata start -w"
     su - postgres -c "createdb synapse_dw" || true
-    su - postgres -c "/usr/lib/postgresql/16/bin/pg_ctl -D /data/pgdata stop -w"
+    su - postgres -c "/usr/lib/postgresql/13/bin/pg_ctl -D /data/pgdata stop -w"
     echo "✅ PostgreSQL initialized with synapse_dw database"
 fi
 
