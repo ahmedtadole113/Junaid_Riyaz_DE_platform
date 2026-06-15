@@ -479,6 +479,14 @@ export default function App() {
                 Dashboard
               </li>
               
+              <li 
+                className={`sidebar-item ${activeTab === 'ai_agent' ? 'active' : ''}`}
+                onClick={() => setActiveTab('ai_agent')}
+              >
+                <MessageSquare size={18} style={{ color: '#ffb900' }} />
+                Platform AI Agent
+              </li>
+              
               {Object.entries(services).map(([key, service]) => {
                 const Icon = SERVICE_ICONS[key] || Server;
                 const isOnline = service.status === 'online';
@@ -1367,11 +1375,107 @@ export default function App() {
     );
   };
 
+  const renderAIAgentView = () => {
+    return (
+      <div className="dashboard-layout" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <div className="dashboard-header" style={{ borderBottom: '2px solid #ffb900' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ background: 'rgba(255,185,0,0.1)', padding: '8px', borderRadius: '10px' }}>
+              <MessageSquare size={24} style={{ color: '#ffb900' }} />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Platform AI Agent</h2>
+              <p style={{ margin: '4px 0 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Global intelligent assistant across all services</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="dashboard-content" style={{ display: 'flex', gap: '1.5rem', flex: 1, minHeight: 0 }}>
+          {/* Main Chat Area */}
+          <div className="dashboard-card" style={{ flex: 2, display: 'flex', flexDirection: 'column', padding: '1.25rem' }}>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: '#ffb900', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Sparkles size={16} /> Global Assistant
+            </h3>
+            
+            <div className="copilot-chat-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '1rem', flexGrow: 1, overflowY: 'auto' }}>
+              {/* Settings Key widget */}
+              <div style={{ marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.3)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid rgba(255,185,0,0.2)' }}>
+                  <Key size={14} style={{ color: geminiKey ? '#ffb900' : 'var(--text-secondary)' }} />
+                  <input 
+                    type="password"
+                    placeholder="Enter Gemini API Key..."
+                    value={geminiKey}
+                    onChange={e => {
+                      setGeminiKey(e.target.value);
+                      localStorage.setItem('gemini_api_key', e.target.value);
+                    }}
+                    style={{ background: 'none', border: 'none', color: '#ffffff', outline: 'none', fontSize: '0.85rem', width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              {/* Text Area */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <textarea
+                  className="form-input"
+                  placeholder="Ask anything about Data Engineering, Airflow, Databricks, Synapse, MinIO, Kafka..."
+                  value={copilotInput['global'] || ""}
+                  onChange={(e) => setCopilotInput(prev => ({ ...prev, 'global': e.target.value }))}
+                  style={{ minHeight: '120px', resize: 'vertical', fontSize: '0.85rem' }}
+                />
+                <button 
+                  className="btn btn-primary" 
+                  style={{ '--theme-color': '#ffb900', padding: '0.6rem' }}
+                  onClick={() => handleCopilotSubmit('global', 'general')}
+                  disabled={copilotLoading['global']}
+                >
+                  {copilotLoading['global'] ? 'Generating...' : 'Send to AI Agent'}
+                </button>
+              </div>
+
+              {/* Response Panel */}
+              <div className="copilot-response-panel" style={{ flexGrow: 1, background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-glass)', borderRadius: '8px', padding: '1rem', overflowY: 'auto' }}>
+                {copilotResponse['global'] ? (
+                  <div className="markdown-content" style={{ fontSize: '0.85rem' }}>
+                    {renderMarkdown(copilotResponse['global'])}
+                  </div>
+                ) : (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', opacity: 0.5 }}>
+                    <MessageSquare size={32} style={{ marginBottom: '0.5rem' }} />
+                    <p>AI Agent Response will appear here</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Side Panel for Prompts */}
+          <div className="dashboard-card" style={{ flex: 1, padding: '1.25rem' }}>
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: '#ffffff' }}>Suggested Prompts</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <button onClick={() => handleCopilotSubmit('global', "general", "How do I configure Airflow to run a PySpark job using Databricks?")} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.6rem', justifyContent: 'flex-start', textAlign: 'left' }}>
+                How to run PySpark in Airflow?
+              </button>
+              <button onClick={() => handleCopilotSubmit('global', "general", "Explain the difference between Bronze, Silver, and Gold zones in a Medallion architecture.")} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.6rem', justifyContent: 'flex-start', textAlign: 'left' }}>
+                Explain Medallion Architecture
+              </button>
+              <button onClick={() => handleCopilotSubmit('global', "general", "What are best practices for setting up Postgres as a Data Warehouse?")} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.6rem', justifyContent: 'flex-start', textAlign: 'left' }}>
+                Postgres Data Warehouse Best Practices
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-wrapper">
       {renderSidebar()}
       <main className="main-content">
         {activeTab === 'dashboard' ? renderDashboardView() : 
+         activeTab === 'ai_agent' ? renderAIAgentView() : 
          activeTab === 'users' ? renderUserManagementView() : 
          renderIframeView(activeTab)}
       </main>
