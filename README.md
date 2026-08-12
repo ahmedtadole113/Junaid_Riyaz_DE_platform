@@ -1,78 +1,66 @@
-# Azure Data Engineering Practice Lab
+# Azure Data Engineering Practice Studio — Spark 4.2 Pro Edition
 
-A modular, lightweight, production-style local data engineering practice platform built with Docker Compose and tuned specifically for Apple Silicon MacBooks (M4/M3/M2/M1) with limited RAM (e.g., 8 GB).
+A modular, high-performance, production-grade local data engineering practice studio with an Apple-refined design aesthetic, powered by **Apache Spark 4.2**, **Delta Lake 4.0**, and **Apache Iceberg**.
 
-It features resource-constrained configurations (staying below **5 GB total RAM**) and exposes a custom React Dashboard to start, stop, and monitor services.
+Tuned specifically for Apple Silicon MacBooks (M4/M3/M2/M1) and constrained RAM machines (staying strictly below **5 GB total RAM**), offering a unified Apple-inspired web console to monitor resources, launch interactive practice labs, and access Apple Intelligence AI Copilot guidance.
 
 ---
 
 ## Technical Service Mapping
 
-The platform simulates Azure Cloud Data services using their direct open-source counterparts:
+The platform simulates Azure Cloud Data services using their direct modern counterparts:
 
-| Azure Service | Local Equivalent | Exposed Port | Container Name | Profile |
+| Azure Service | Local Equivalent | Exposed Port | Container / Process | Profile |
 | :--- | :--- | :--- | :--- | :--- |
-| **Azure Data Factory** | Apache Airflow 2.9 (Sequential/SQLite) | `8085` | `airflow-webserver` | `profile-orchestration` |
-| **Azure Databricks** | Apache Spark 3.5 + Delta Lake + JupyterLab | `8888` / `8080` | `spark-processing` | `profile-processing` |
-| **ADLS Gen2** | MinIO S3-Compatible Object Store | `9000` / `9001` | `minio` | `profile-storage` |
+| **Azure Databricks** | **Apache Spark 4.2** + Delta Lake 4.0 + JupyterLab | `8888` / `8080` | `spark-processing` | `profile-processing` |
+| **ADLS Gen2** | MinIO S3 Object Store (Bronze / Silver / Gold) | `9000` / `9001` | `minio` | `profile-storage` |
+| **Azure Data Factory** | Apache Airflow 2.9 (PySpark 4.2 Integrated) | `8085` | `airflow-webserver` | `profile-orchestration` |
 | **Azure Synapse SQL** | PostgreSQL 16 (DW) + pgAdmin 4 | `5432` / `5050` | `postgres-dw` / `pgadmin` | `profile-warehouse` |
-| **Azure Event Hub** | Redpanda + Redpanda Console | `9092` / `8081` | `redpanda` / `console` | `profile-streaming` |
-| **Azure Service Bus** | RabbitMQ + Management Console | `5672` / `15672` | `rabbitmq` | `profile-streaming` |
-| **Azure Monitor** | Grafana | `3000` | `grafana` | `profile-monitoring` |
-| **Unified Portal** | FastAPI (Backend) + React Vite (Frontend) | `8000` / `5173` | `portal-backend` / `portal-frontend` | (Always On / Core) |
+| **Azure Event Hub** | Redpanda + Redpanda Console (Kafka) | `9092` / `8081` | `redpanda` / `console` | `profile-streaming` |
+| **Azure Service Bus** | RabbitMQ + Management Console (AMQP) | `5672` / `15672` | `rabbitmq` | `profile-streaming` |
+| **Azure Monitor** | Grafana Metrics | `3010` / `3000` | `grafana` | `profile-monitoring` |
+| **Studio Console** | Apple-Refined React UI + FastAPI | `5173` / `8000` | `portal-frontend` / `backend` | (Core / Default) |
 
 ---
 
-## Key Optimizations for 8 GB RAM Mac
+## Key Apache Spark 4.2 Features Enabled
 
-To avoid system out-of-memory errors on Apple Silicon hosts, the following constraints are built-in:
-1. **Lightweight Orchestration:** Apache Airflow uses a `SequentialExecutor` with an `SQLite` metadata database, eliminating the memory overhead of a separate metadata Postgres container.
-2. **Spark Constraint:** Spark is run inside a single container with a Spark Master, worker, and executor. Memory is limited to **1 GB Driver** and **1 GB Executor**.
-3. **Optimized Shuffle Partitions:** `spark.sql.shuffle.partitions` is set to `10` (down from default `200`) to prevent high thread count and memory overhead.
-4. **Streaming Footprint:** Redpanda is configured in `--dev-overrides=true` developer mode with a hard threshold of `256 MB` memory limit.
-5. **Postgres Footprint:** PostgreSQL is limited to a small shared buffers and memory size (max `256 MB` RAM limit).
-6. **Container Profiles:** Docker Compose profiles are utilized, letting you run only the exact service profiles you need for your current practice session.
+1. **ANSI SQL Mode by Default:** Strict standards-compliant SQL query parsing and error validation.
+2. **Delta Lake 4.0 & Iceberg v2 Extensions:** Multi-table ACID support, `MERGE INTO`, time-travel, and schema evolution.
+3. **Structured Streaming 4.2:** Ultra-fast streaming integration from Redpanda (Event Hub) to Delta tables.
+4. **Memory Efficient Shuffles:** `spark.sql.shuffle.partitions=10` and adaptive query execution enabled for 8 GB RAM machines.
 
 ---
 
 ## Getting Started
 
-### 1. Bootstrap the platform
+### 1. Bootstrap the Studio
 Run the setup script from the root of the repository:
 ```bash
 ./init-lab.sh
 ```
-This script will build the dashboard containers, boot the core portal, start MinIO, and create the storage buckets (`bronze`, `silver`, `gold`).
+This script initializes the environment, starts MinIO, creates the lakehouse buckets (`bronze`, `silver`, `gold`, `warehouse`), and launches the Apple-styled Studio Console.
 
-### 2. Access the UIs
-- **Unified DE Portal Console:** [http://localhost:5173](http://localhost:5173) (Use this to monitor RAM/CPU usage and start/stop services dynamically)
+### 2. Access the Studio
+- **Apple Pro Studio Console:** [http://localhost:5173](http://localhost:5173) (Passwordless / default admin: `aariz` / `aariz`)
 - **Data Lake (MinIO) Console:** [http://localhost:9001](http://localhost:9001) (`admin` / `password`)
 
 ---
 
-## Pre-Built Practice Projects
+## Pre-Configured Hands-On Practice Labs
 
-### Project 1: Batch ETL Ingestion & Medallion Pipeline
-- **Flow:** Local TPC-H CSVs $\to$ MinIO Bronze $\to$ Spark Cleaning $\to$ MinIO Silver $\to$ Spark Aggregate $\to$ MinIO Gold $\to$ PostgreSQL Fact Table.
-- **Practice:** Start `profile-orchestration` and `profile-warehouse`. Go to [Airflow](http://localhost:8085), search for `project1_adf_batch_pipeline`, and trigger it.
+1. **Project 1: Batch ETL & Medallion Pipeline**
+   - **Flow:** Raw CSVs $\to$ MinIO Bronze $\to$ PySpark 4.2 Cleaning $\to$ MinIO Silver $\to$ Spark Aggregations $\to$ MinIO Gold $\to$ PostgreSQL Fact Table.
+   - **Practice:** Open [Medallion Architecture Notebook](file:///home/iceberg/notebooks/notebooks/Medallion_Architecture_TPCH.ipynb).
 
-### Project 2: Structured Streaming
-- **Flow:** Redpanda $\to$ Spark Structured Streaming $\to$ Delta Lake.
-- **Practice:** Start `profile-processing` and `profile-streaming`. Open JupyterLab at [http://localhost:8888](http://localhost:8888) and open `project2_eventhub_streaming.ipynb`.
+2. **Project 2: Structured Streaming**
+   - **Flow:** Redpanda (Event Hub) $\to$ PySpark Structured Streaming $\to$ Delta Lake 4.0.
+   - **Practice:** Open [Streaming Lab Notebook](file:///home/iceberg/notebooks/notebooks/project2_eventhub_streaming.ipynb).
 
-### Project 3: Incremental Ingestion & Watermarking
-- **Flow:** API $\to$ Airflow $\to$ Delta Lake $\to$ Postgres Warehouse.
-- **Practice:** Start `profile-orchestration` and `profile-warehouse`. Look up `project3_adf_incremental_load` in Airflow. It queries the mock transactions API and performs a `MERGE` into Postgres.
+3. **Project 3: Incremental Ingestion & Watermarking**
+   - **Flow:** REST API $\to$ Airflow 2.9 $\to$ Delta MERGE Upsert $\to$ Postgres Warehouse.
+   - **Practice:** Open `project3_adf_incremental_load` in Airflow.
 
-### Project 4: Change Data Capture (CDC)
-- **Flow:** PostgreSQL Source $\to$ Redpanda $\to$ Spark Streaming $\to$ Target PostgreSQL DW.
-- **Practice:** Start `profile-processing`, `profile-warehouse`, and `profile-streaming`. Run `project4_cdc_pipeline.ipynb` in JupyterLab.
-
----
-
-## Local Feature Demonstrations
-Open JupyterLab at [http://localhost:8888](http://localhost:8888) and run the following notebooks to practice specific cloud concepts:
-1. **Azure Synapse Features:** [synapse_features_demo.ipynb](file:///home/iceberg/notebooks/notebooks/synapse_features_demo.ipynb)
-   - Dedicated SQL Pool schemas, Serverless External Tables, PolyBase ingestion, and Materialized views.
-2. **Databricks Features:** [databricks_features_demo.ipynb](file:///home/iceberg/notebooks/notebooks/databricks_features_demo.ipynb)
-   - Delta Lake `MERGE`, versioned Time Travel, schema evolution, and Auto Loader simulation.
+4. **Project 4: Change Data Capture (CDC)**
+   - **Flow:** PostgreSQL Source $\to$ Redpanda $\to$ Spark Streaming $\to$ Target Lakehouse Tables.
+   - **Practice:** Open [CDC Pipeline Notebook](file:///home/iceberg/notebooks/notebooks/project4_cdc_pipeline.ipynb).

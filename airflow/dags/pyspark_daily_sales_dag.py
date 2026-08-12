@@ -14,14 +14,14 @@ default_args = {
 with DAG(
     'pyspark_daily_sales_dag',
     default_args=default_args,
-    description='Run PySpark Daily Sales Aggregation',
+    description='Run PySpark 4.2 Daily Sales Aggregation',
     schedule_interval='@daily',
     catchup=False,
 ) as dag:
 
     run_spark_job = BashOperator(
         task_id='run_daily_sales_aggregation',
-        bash_command='pip install pyspark && python /opt/airflow/dags/spark_jobs/daily_sales_aggregation.py'
+        bash_command='python /opt/airflow/dags/spark_jobs/daily_sales_aggregation.py'
     )
 
     run_spark_job

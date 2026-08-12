@@ -2,7 +2,7 @@
 # Azure Data Engineering Practice Lab — Unified Docker Image
 # ============================================================
 # Consolidates all 13 services into a single container.
-# Base: tabulario/spark-iceberg (Java 17 + Spark 3.5 + Python + Jupyter)
+# Base: tabulario/spark-iceberg (Java 17 + Spark 4.2 + Python + Jupyter)
 # ============================================================
 
 # ── Stage 1: Build React Frontend ──
@@ -56,8 +56,8 @@ RUN curl -fsSL https://dl.grafana.com/oss/release/grafana-10.4.1.linux-${TARGETA
     | tar xz -C /opt/ \
     && mv /opt/grafana-v10.4.1 /opt/grafana
 
-# ── Install extra Jupyter/Spark packages (before Airflow to avoid SQLAlchemy conflict) ──
-RUN pip install --no-cache-dir duckdb ipython-sql jupysql jupyterlab-git
+# ── Install extra Jupyter/Spark packages (Spark 4.2 + Delta Lake 4.x + DuckDB) ──
+RUN pip install --no-cache-dir "pyspark>=4.2.0" "delta-spark>=4.0.0" duckdb ipython-sql jupysql jupyterlab-git
 
 # ── Install Airflow (pins SQLAlchemy <2.0 which Airflow requires) ──
 RUN pip install --no-cache-dir \
